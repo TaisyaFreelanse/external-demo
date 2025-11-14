@@ -9,9 +9,6 @@
         <p class="text-white/60 text-sm mb-4">
           Тестовая площадка для проверки работы внешнего API создания и публикации мероприятий
         </p>
-        <div class="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 text-sm text-blue-300">
-          <strong>API Base URL:</strong> {{ apiBaseUrl }}
-        </div>
       </div>
 
       <!-- Форма создания/обновления -->
