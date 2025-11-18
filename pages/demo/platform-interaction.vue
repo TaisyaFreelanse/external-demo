@@ -168,7 +168,7 @@
                 </div>
                 <div>
                   <div class="text-xs text-white/50 mb-1">
-                    Нач.<span class="block">оформ. договоров</span>
+                    Нач. оформ.<span class="block">договоров</span>
                   </div>
                   <div class="text-white/90 text-sm">{{ formatDateDisplay(currentEvent.data?.startContractsAtDate, currentEvent.data?.startContractsAtTime) }}</div>
                 </div>
