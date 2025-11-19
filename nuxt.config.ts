@@ -15,13 +15,6 @@ export default defineNuxtConfig({
   // Отключаем SSR для простоты (можно включить позже)
   ssr: false,
   
-  // Настройки для генерации статического сайта
-  nitro: {
-    prerender: {
-      routes: ['/']
-    }
-  },
-  
   // CSS
   css: ['~/assets/css/main.css'],
   
