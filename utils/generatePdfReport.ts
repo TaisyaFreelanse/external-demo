@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
-import type { MonitoringSnapshot, Applicant, PaymentEntry } from '~/types'
+import type { MonitoringSnapshot, Applicant, PaymentEntry } from '~/types/index'
 import { DateTime } from 'luxon'
 
 interface EventData {
