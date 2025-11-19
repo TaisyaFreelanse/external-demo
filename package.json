@@ -12,6 +12,9 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
+    "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.2",
+    "jszip": "^3.10.1",
     "luxon": "^3.7.2",
     "nuxt": "^3.13.0",
     "vue": "^3.5.0"
