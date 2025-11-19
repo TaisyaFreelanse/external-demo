@@ -272,7 +272,6 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { DateTime } from 'luxon'
 import type { MonitoringSnapshot, Applicant } from '~/types'
-import { generateZipArchive, getZipFileName } from '~/utils/generatePdfReport'
 
 const config = useRuntimeConfig()
 const apiBaseUrl = config.public.apiBaseUrl
@@ -654,6 +653,9 @@ const generateAndDownloadZip = async () => {
   error.value = null
 
   try {
+    // Динамический импорт для client-only библиотек
+    const { generateZipArchive, getZipFileName } = await import('~/utils/generatePdfReport')
+
     // Преобразование priceTotal в число, если это строка
     const priceTotal = typeof currentEvent.value.data.priceTotal === 'string'
       ? Number(currentEvent.value.data.priceTotal)

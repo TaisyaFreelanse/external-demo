@@ -36,6 +36,13 @@ export default defineNuxtConfig({
   // Модули
   modules: ['@nuxtjs/tailwindcss'],
   
+  // Vite конфигурация для корректной работы с client-only библиотеками
+  vite: {
+    optimizeDeps: {
+      include: ['jspdf', 'jspdf-autotable', 'jszip']
+    }
+  },
+  
   // Мета-теги
   app: {
     head: {
