@@ -668,7 +668,8 @@ const adaptedEventForPersonalCalc = computed<EventItem | null>(() => {
 
 // Проверка условий для отображения модального окна персональной калькуляции
 const canShowPersonalCalc = computed(() => {
-  const result = !!(currentEvent.value && monitoringData.value && selectedApplicantForCalc.value && selectedApplicantForCalc.value.code && adaptedEventForPersonalCalc.value)
+  const hasApplicant = selectedApplicantForCalc.value && (selectedApplicantForCalc.value.code || selectedApplicantForCalc.value.login)
+  const result = !!(currentEvent.value && monitoringData.value && hasApplicant && adaptedEventForPersonalCalc.value)
   if (process.client && isPersonalCalcOpen.value) {
     console.log('🎯 canShowPersonalCalc check:', {
       result,
@@ -676,6 +677,7 @@ const canShowPersonalCalc = computed(() => {
       hasMonitoringData: !!monitoringData.value,
       hasSelectedApplicant: !!selectedApplicantForCalc.value,
       hasCode: !!selectedApplicantForCalc.value?.code,
+      hasLogin: !!selectedApplicantForCalc.value?.login,
       hasAdaptedEvent: !!adaptedEventForPersonalCalc.value,
       isPersonalCalcOpen: isPersonalCalcOpen.value
     })
@@ -683,7 +685,17 @@ const canShowPersonalCalc = computed(() => {
   return result
 })
 
+// Получаем цену за место из готовых данных API (одинакова для всех участников)
 const pricePerSeat = computed(() => {
+  // Сначала пытаемся взять из персональных расчетов (если есть)
+  if (monitoringData.value?.personalCalculations && monitoringData.value.personalCalculations.length > 0) {
+    const firstCalc = monitoringData.value.personalCalculations[0]
+    if (firstCalc.pricePerSeat) {
+      return firstCalc.pricePerSeat
+    }
+  }
+  
+  // Fallback: вычисляем из данных события
   const eventData = currentEvent.value?.data
   if (!eventData) return 0
   const rawPrice = eventData.pricePerSeat
@@ -694,31 +706,9 @@ const pricePerSeat = computed(() => {
   const required = typeof eventData.priceTotal === 'string'
     ? Number(eventData.priceTotal)
     : (eventData.priceTotal || 0)
-  const divisor = withinLimitCount.value > 0 ? withinLimitCount.value : sortedApplicants.value.length || 1
-  if (divisor <= 0) return required
-  return Math.round(required / divisor)
-})
-
-const extrasMap = computed(() => {
-  const map = new Map<string, { expected: number; extra: number; deficit: number }>()
-  withinLimitApplicants.value.forEach((applicant) => {
-    const key = applicantKey(applicant)
-    const seats = applicant.seats || 1
-    const expected = seats * pricePerSeat.value
-    const paidAmount = applicant.paidAmount || 0
-    const extra = Math.max(0, paidAmount - expected)
-    const deficit = Math.max(0, expected - paidAmount)
-    map.set(key, { expected, extra, deficit })
-  })
-  return map
-})
-
-const totalExtras = computed(() => {
-  let sum = 0
-  for (const data of extrasMap.value.values()) {
-    sum += data.extra
-  }
-  return sum
+  const limit = seatLimit.value > 0 ? seatLimit.value : sortedApplicants.value.length || 1
+  if (limit <= 0) return required
+  return Math.round(required / limit)
 })
 
 const eventSuccessful = computed(() => {
@@ -731,76 +721,51 @@ const eventSuccessful = computed(() => {
   return deficit <= 0
 })
 
-// Проверка вхождения в лимит
-const isInLimit = (applicant: Applicant, index: number): boolean => {
-  return index < withinLimitCount.value
+// Проверка вхождения в лимит - используем готовые данные из API
+const isInLimit = (applicant: Applicant): boolean => {
+  const calc = getPersonalCalculation(applicant)
+  return calc?.status === 'success'
 }
 
-// Получение статуса заявителя
+// Получение статуса заявителя - используем готовые данные из API
 const getStatusText = (applicant: Applicant): string => {
-  const index = findApplicantIndexByKey(applicantKey(applicant))
-  if (index < 0) return 'Неизвестно'
-  if (isInLimit(applicant, index)) {
-    return 'В лимите'
-  }
-  return 'Вне лимита'
+  const calc = getPersonalCalculation(applicant)
+  if (!calc) return 'Неизвестно'
+  if (calc.status === 'success') return 'В лимите'
+  if (calc.status === 'overflow') return 'Вне лимита'
+  if (calc.status === 'failed') return 'Сбор не состоялся'
+  return 'Неизвестно'
 }
 
 const getStatusClass = (applicant: Applicant): string => {
-  const index = findApplicantIndexByKey(applicantKey(applicant))
-  if (index < 0) return 'bg-gray-500/20 text-gray-300'
-  if (isInLimit(applicant, index)) {
-    return 'bg-green-500/20 text-green-300'
-  }
-  return 'bg-red-500/20 text-red-300'
+  const calc = getPersonalCalculation(applicant)
+  if (!calc) return 'bg-gray-500/20 text-gray-300'
+  if (calc.status === 'success') return 'bg-green-500/20 text-green-300'
+  if (calc.status === 'overflow') return 'bg-red-500/20 text-red-300'
+  if (calc.status === 'failed') return 'bg-yellow-500/20 text-yellow-300'
+  return 'bg-gray-500/20 text-gray-300'
 }
 
-// Расчет возвращаемой суммы
+// Получение персонального расчета для участника из готовых данных API
+const getPersonalCalculation = (applicant: Applicant) => {
+  if (!monitoringData.value?.personalCalculations) return null
+  // Ищем по логину (предпочтительно)
+  if (applicant.login) {
+    const found = monitoringData.value.personalCalculations.find(calc => 
+      calc.applicantLogin?.trim().toLowerCase() === applicant.login?.trim().toLowerCase()
+    )
+    if (found) return found
+  }
+  // Ищем по коду
+  return monitoringData.value.personalCalculations.find(calc => 
+    calc.applicantCode.trim() === applicant.code.trim()
+  ) || null
+}
+
+// Расчет возвращаемой суммы - используем готовые данные из API
 const getRefundAmount = (applicant: Applicant): number => {
-  if (!monitoringData.value) return 0
-  const key = applicantKey(applicant)
-  const index = findApplicantIndexByKey(key)
-  if (index < 0) return 0
-
-  const totalPaid = applicant.paidAmount || 0
-
-  if (!eventSuccessful.value) {
-    return totalPaid
-  }
-
-  if (index >= withinLimitCount.value) {
-    return totalPaid
-  }
-
-  const extraData = extrasMap.value.get(key)
-  const expected = extraData?.expected ?? (pricePerSeat.value * (applicant.seats || 1))
-  const extraContribution = extraData?.extra ?? Math.max(0, totalPaid - expected)
-
-  const surplus = surplusToDistribute.value
-  if (surplus <= 0) {
-    return 0
-  }
-
-  let share = 0
-  if (withinLimitCount.value === 1) {
-    share = 1
-  } else if (totalExtras.value > 0) {
-    share = extraContribution > 0 ? extraContribution / totalExtras.value : 0
-  } else if (withinLimitCount.value > 0) {
-    share = 1 / withinLimitCount.value
-  }
-
-  // Вычисляем возврат из профицита (точно как в PDF)
-  const refundFromSurplus = Math.round(surplus * share)
-
-  if (extraContribution > 0) {
-    if (surplus >= totalExtras.value && totalExtras.value > 0) {
-      return extraContribution
-    }
-    return Math.min(extraContribution, refundFromSurplus)
-  }
-
-  return refundFromSurplus
+  const calc = getPersonalCalculation(applicant)
+  return calc?.refundTotal ?? 0
 }
 
 // Переключение отображения платежей

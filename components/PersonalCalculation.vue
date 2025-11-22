@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import type { EventItem, MonitoringSnapshot, Applicant } from '~/types'
+import type { EventItem, MonitoringSnapshot, Applicant, PersonalCalculation } from '~/types'
 
 const props = defineProps<{
   event: EventItem
   snapshot: MonitoringSnapshot
   isOpen: boolean
   currentUserCode?: string
-  currentUserLogin?: string // Добавляем поддержку логина
+  currentUserLogin?: string
 }>()
 
 const emit = defineEmits<{ close: [] }>()
@@ -21,101 +21,116 @@ if (process.client) {
       hasEvent: !!props.event,
       hasSnapshot: !!props.snapshot,
       currentUserCode: props.currentUserCode,
-      currentUserLogin: props.currentUserLogin
+      currentUserLogin: props.currentUserLogin,
+      hasPersonalCalculations: !!props.snapshot.personalCalculations,
+      personalCalculationsCount: props.snapshot.personalCalculations?.length || 0
     })
   }, { immediate: true })
 }
 
-const getLastPaymentTimestamp = (applicant: Applicant): number | null => {
-  const payments = applicant.payments ?? []
-  if (!payments.length) return null
-  const lastPayment = payments[payments.length - 1]
-  const timestamp = new Date(lastPayment.createdAt).getTime()
-  return Number.isNaN(timestamp) ? null : timestamp
-}
-
-const sortedApplicants = computed<Applicant[]>(() => {
-  return [...props.snapshot.applicants].sort((a, b) => {
-    if (b.paidAmount !== a.paidAmount) {
-      return b.paidAmount - a.paidAmount
+// Находим персональный расчет для текущего пользователя из готовых данных API
+const personalCalculation = computed<PersonalCalculation | null>(() => {
+  if (!props.snapshot.personalCalculations || props.snapshot.personalCalculations.length === 0) {
+    if (process.client) {
+      console.warn('PersonalCalculation: personalCalculations not found in snapshot')
     }
+    return null
+  }
 
-    const timeA = getLastPaymentTimestamp(a)
-    const timeB = getLastPaymentTimestamp(b)
-
-    if (timeA !== null && timeB !== null && timeA !== timeB) {
-      return timeA - timeB
+  // Сначала ищем по логину (предпочтительно)
+  if (props.currentUserLogin) {
+    const normalizedLogin = props.currentUserLogin.trim().toLowerCase()
+    const found = props.snapshot.personalCalculations.find(calc => {
+      if (!calc.applicantLogin) return false
+      return calc.applicantLogin.trim().toLowerCase() === normalizedLogin
+    })
+    if (found) {
+      if (process.client) {
+        console.log('✅ PersonalCalculation: found by login', found)
+      }
+      return found
     }
-
-    if (timeA !== null && timeB === null) return -1
-    if (timeA === null && timeB !== null) return 1
-
-    return a.code.localeCompare(b.code)
-  })
-})
-
-const limitIndex = computed(() => {
-  const limit = props.event.seatLimit ?? 0
-  if (!limit || limit <= 0) {
-    return sortedApplicants.value.length
   }
-  return Math.min(limit, sortedApplicants.value.length)
-})
 
-const withinLimitApplicants = computed(() => sortedApplicants.value.slice(0, limitIndex.value))
-const overflowApplicants = computed(() => sortedApplicants.value.slice(limitIndex.value))
-
-const overflowTotal = computed(() => overflowApplicants.value.reduce((sum, applicant) => sum + applicant.paidAmount, 0))
-
-const pricePerSeat = computed(() => {
-  if (props.event.pricePerSeat && props.event.pricePerSeat > 0) {
-    return props.event.pricePerSeat
+  // Если не нашли по логину, ищем по коду
+  if (props.currentUserCode) {
+    const normalizedCode = props.currentUserCode.trim()
+    const found = props.snapshot.personalCalculations.find(calc => {
+      if (!calc.applicantCode) return false
+      return calc.applicantCode.trim() === normalizedCode
+    })
+    if (found) {
+      if (process.client) {
+        console.log('✅ PersonalCalculation: found by code', found)
+      }
+      return found
+    }
   }
-  const base = props.event.priceTotal || 0
-  const divisor = limitIndex.value > 0 ? limitIndex.value : sortedApplicants.value.length || 1
-  return Math.round(base / divisor)
-})
 
-const totalSurplus = computed(() => {
-  if (typeof props.snapshot.surplus === 'number') return props.snapshot.surplus
-  const collected = props.snapshot.collected ?? 0
-  const target = props.event.priceTotal ?? 0
-  return Math.max(0, collected - target)
-})
-
-const surplusForDistribution = computed(() => Math.max(0, totalSurplus.value - overflowTotal.value))
-
-const expectedPaymentFor = (applicant: Applicant) => {
-  const seats = applicant.seats || 1
-  return seats * pricePerSeat.value
-}
-
-const extrasMap = computed(() => {
-  const map = new Map<string, { expected: number; extra: number; deficit: number }>()
-  withinLimitApplicants.value.forEach((applicant) => {
-    const expected = expectedPaymentFor(applicant)
-    const extra = Math.max(0, applicant.paidAmount - expected)
-    const deficit = Math.max(0, expected - applicant.paidAmount)
-    map.set(applicant.code, { expected, extra, deficit })
-  })
-  return map
-})
-
-const totalExtras = computed(() => {
-  let sum = 0
-  for (const data of extrasMap.value.values()) {
-    sum += data.extra
+  if (process.client) {
+    console.warn('❌ PersonalCalculation: calculation not found for user', {
+      currentUserCode: props.currentUserCode,
+      currentUserLogin: props.currentUserLogin,
+      availableCodes: props.snapshot.personalCalculations.map(c => c.applicantCode),
+      availableLogins: props.snapshot.personalCalculations.map(c => c.applicantLogin).filter(Boolean)
+    })
   }
-  return sum
+  return null
 })
 
+// Находим заявителя для отображения дополнительной информации
+const ownerApplicant = computed<Applicant | null>(() => {
+  if (!props.currentUserCode && !props.currentUserLogin) return null
+
+  // Сначала ищем по логину
+  if (props.currentUserLogin) {
+    const normalizedLogin = props.currentUserLogin.trim().toLowerCase()
+    const found = props.snapshot.applicants.find(applicant => {
+      if (!applicant.login) return false
+      return applicant.login.trim().toLowerCase() === normalizedLogin
+    })
+    if (found) return found
+  }
+
+  // Ищем по коду
+  if (props.currentUserCode) {
+    const normalizedCode = props.currentUserCode.trim()
+    const found = props.snapshot.applicants.find(applicant => {
+      if (!applicant.code) return false
+      return applicant.code.trim() === normalizedCode
+    })
+    if (found) return found
+  }
+
+  return null
+})
+
+// Проверяем, является ли просматривающий участником
+const isViewerParticipant = computed(() => {
+  return !!personalCalculation.value || !!ownerApplicant.value
+})
+
+// Статус сбора мероприятия
 const eventSuccessful = computed(() => {
   if (props.snapshot.isCancelled) return false
   const deficit = props.snapshot.deficit ?? Math.max(0, (props.event.priceTotal || 0) - (props.snapshot.collected || 0))
   return deficit <= 0
 })
 
-const formatMoney = (amount: number) => {
+// Цена за место из персонального расчета или события
+const pricePerSeat = computed(() => {
+  if (personalCalculation.value?.pricePerSeat) {
+    return personalCalculation.value.pricePerSeat
+  }
+  if (props.event.pricePerSeat && props.event.pricePerSeat > 0) {
+    return props.event.pricePerSeat
+  }
+  return 0
+})
+
+// Утилиты форматирования
+const formatMoney = (amount: number | undefined | null) => {
+  if (amount === undefined || amount === null) return '0.00'
   return (amount / 100).toLocaleString('ru-RU', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
@@ -132,8 +147,8 @@ const formatDateTime = (iso: string) => {
   })
 }
 
-const formatTimestamp = (timestamp: number | null) => {
-  if (timestamp === null) return '—'
+const formatTimestamp = (timestamp: number | null | undefined) => {
+  if (timestamp === null || timestamp === undefined) return '—'
   return new Date(timestamp).toLocaleString('ru-RU', {
     day: '2-digit',
     month: 'long',
@@ -147,224 +162,14 @@ const closeModal = () => {
   emit('close')
 }
 
-const isViewerParticipant = computed(() => {
-  if (!props.currentUserCode && !props.currentUserLogin) return false
-  return sortedApplicants.value.some(applicant => {
-    // Проверяем по логину (предпочтительно)
-    if (props.currentUserLogin && applicant.login) {
-      return applicant.login === props.currentUserLogin
-    }
-    // Проверяем по коду (для обратной совместимости)
-    if (props.currentUserCode && applicant.code) {
-      return applicant.code === props.currentUserCode
-    }
-    return false
-  })
-})
-
-const ownerApplicant = computed(() => {
-  if (!props.currentUserCode && !props.currentUserLogin) {
-    if (process.client) {
-      console.log('PersonalCalculation: no currentUserCode or currentUserLogin provided')
-    }
-    return null
-  }
-  
-  if (process.client) {
-    console.log('🔍 PersonalCalculation: searching for applicant', {
-      currentUserCode: props.currentUserCode,
-      currentUserLogin: props.currentUserLogin,
-      applicantsCount: sortedApplicants.value.length,
-      applicants: sortedApplicants.value.map(a => ({
-        code: a.code,
-        codeType: typeof a.code,
-        codeLength: a.code?.length,
-        login: a.login,
-        loginType: typeof a.login,
-        paidAmount: a.paidAmount
-      }))
-    })
-  }
-  
-  // Сначала ищем по логину (предпочтительно)
-  if (props.currentUserLogin) {
-    // Нормализуем логин (убираем пробелы, приводим к нижнему регистру для сравнения)
-    const normalizedLogin = props.currentUserLogin.trim().toLowerCase()
-    const foundByLogin = sortedApplicants.value.find(applicant => {
-      if (!applicant.login) return false
-      return applicant.login.trim().toLowerCase() === normalizedLogin
-    })
-    if (foundByLogin) {
-      if (process.client) {
-        console.log('✅ PersonalCalculation: found by login', foundByLogin)
-      }
-      return foundByLogin
-    }
-    if (process.client) {
-      console.log('❌ PersonalCalculation: not found by login', {
-        searchedLogin: props.currentUserLogin,
-        normalizedLogin,
-        availableLogins: sortedApplicants.value.map(a => ({
-          original: a.login,
-          normalized: a.login?.trim().toLowerCase()
-        })).filter(a => a.original)
-      })
-    }
-  }
-  
-  // Если не нашли по логину, ищем по коду
-  if (props.currentUserCode) {
-    // Нормализуем код (убираем пробелы)
-    const normalizedCode = props.currentUserCode.trim()
-    const foundByCode = sortedApplicants.value.find(applicant => {
-      if (!applicant.code) return false
-      return applicant.code.trim() === normalizedCode
-    })
-    if (foundByCode) {
-      if (process.client) {
-        console.log('✅ PersonalCalculation: found by code', foundByCode)
-      }
-      return foundByCode
-    }
-    if (process.client) {
-      console.log('❌ PersonalCalculation: not found by code', {
-        searchedCode: props.currentUserCode,
-        normalizedCode,
-        availableCodes: sortedApplicants.value.map(a => ({
-          code: a.code,
-          codeType: typeof a.code,
-          codeLength: a.code?.length,
-          matches: a.code?.trim() === normalizedCode
-        }))
-      })
-    }
-  }
-  
-  if (process.client) {
-    console.log('❌ PersonalCalculation: applicant not found')
-  }
-  return null
-})
-
-const resultForOwner = computed(() => {
-  if (!ownerApplicant.value) {
-    if (!sortedApplicants.value.length) return null
-    return null
-  }
-  return computeResult(ownerApplicant.value)
-})
-
-const result = computed(() => resultForOwner.value)
-
-const computeResult = (applicant: Applicant | null) => {
-  if (!applicant) return null
-
-  const payments = (applicant.payments ?? []).map((payment) => ({
+// Получаем платежи из заявителя
+const payments = computed(() => {
+  if (!ownerApplicant.value?.payments) return []
+  return ownerApplicant.value.payments.map(payment => ({
     amount: payment.amount,
     createdAt: payment.createdAt
   }))
-  const totalPaid = applicant.paidAmount
-
-  if (!eventSuccessful.value) {
-    const deficit = props.snapshot.deficit ?? Math.max(0, (props.event.priceTotal || 0) - (props.snapshot.collected || 0))
-    return {
-      status: 'failed' as const,
-      totalPaid,
-      payments,
-      refundTotal: totalPaid,
-      deficit
-    }
-  }
-
-  const index = sortedApplicants.value.findIndex((candidate) => candidate.code === applicant.code)
-  const effectiveIndex = index === -1 && ownerApplicant.value ? sortedApplicants.value.findIndex((candidate) => candidate.code === ownerApplicant.value?.code) : index
-  const positionIndex = effectiveIndex === -1 ? sortedApplicants.value.findIndex(candidate => candidate.code === applicant.code) : effectiveIndex
-
-  if (positionIndex >= limitIndex.value) {
-    const thresholdApplicant = limitIndex.value > 0 ? sortedApplicants.value[limitIndex.value - 1] : null
-    const thresholdAmount = thresholdApplicant?.paidAmount ?? null
-    const thresholdTime = thresholdApplicant ? getLastPaymentTimestamp(thresholdApplicant) : null
-    const selectedTime = getLastPaymentTimestamp(applicant)
-
-    let reason: 'lower' | 'late' = 'lower'
-    if (
-      thresholdApplicant &&
-      thresholdAmount !== null &&
-      thresholdAmount === totalPaid &&
-      selectedTime !== null &&
-      thresholdTime !== null &&
-      selectedTime > thresholdTime
-    ) {
-      reason = 'late'
-    }
-
-    return {
-      status: 'overflow' as const,
-      totalPaid,
-      payments,
-      refundTotal: totalPaid,
-      reason,
-      thresholdAmount,
-      thresholdTime,
-      selectedTime
-    }
-  }
-
-  const extraData = extrasMap.value.get(applicant.code)
-  const expectedPayment = extraData?.expected ?? expectedPaymentFor(applicant)
-  const extraContribution = extraData?.extra ?? Math.max(0, applicant.paidAmount - expectedPayment)
-  const deficit = extraData?.deficit ?? Math.max(0, expectedPayment - applicant.paidAmount)
-
-  let share = 0
-  if (surplusForDistribution.value > 0) {
-    const count = withinLimitApplicants.value.length || 1
-    if (count === 1) {
-      // Для одного участника весь профицит возвращается ему
-      share = 1
-    } else if (totalExtras.value > 0) {
-      // Распределяем пропорционально переплатам
-      share = extraContribution / totalExtras.value
-    } else {
-      // Нет переплат - распределяем поровну
-      share = 1 / count
-    }
-  }
-  const refundFromSurplus = Math.round(surplusForDistribution.value * share)
-
-  // Итоговый возврат: если участник переплатил, возвращаем его переплату (но не больше профицита)
-  // Если профицит >= суммы всех переплат, возвращаем всю переплату участника
-  // Если профицит < суммы всех переплат, возвращаем пропорциональную долю из профицита
-  // Но в любом случае не больше, чем переплата участника
-  let refundTotal = 0
-  if (extraContribution > 0) {
-    // Если профицит больше или равен сумме всех переплат, возвращаем всю переплату
-    if (surplusForDistribution.value >= totalExtras.value && totalExtras.value > 0) {
-      refundTotal = extraContribution
-    } else {
-      // Если профицит меньше суммы всех переплат, возвращаем пропорциональную долю
-      // Но не больше, чем переплата участника
-      refundTotal = Math.min(extraContribution, refundFromSurplus)
-    }
-  } else {
-    // Если нет переплаты, возврат из профицита (если профицит распределяется поровну)
-    refundTotal = refundFromSurplus
-  }
-
-  return {
-    status: 'success' as const,
-    totalPaid,
-    payments,
-    expectedPayment,
-    extraContribution,
-    deficit,
-    share,
-    refundFromSurplus,
-    refundTotal,
-    pricePerSeat: pricePerSeat.value,
-    surplusAvailable: surplusForDistribution.value,
-    overflowTotal: overflowTotal.value
-  }
-}
+})
 </script>
 
 <template>
@@ -416,7 +221,7 @@ const computeResult = (applicant: Applicant | null) => {
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div class="info-card">
                 <span class="label">Мест всего</span>
-                <span class="value">{{ props.event.seatLimit ?? sortedApplicants.length }}</span>
+                <span class="value">{{ props.event.seatLimit ?? snapshot.applicants.length }}</span>
               </div>
               <div class="info-card">
                 <span class="label">Базовая цена за место</span>
@@ -432,7 +237,7 @@ const computeResult = (applicant: Applicant | null) => {
               Вы еще не подавали заявку на это мероприятие. Подайте заявку, чтобы увидеть персональный расчет.
             </div>
 
-            <div v-else-if="ownerApplicant" class="p-6 rounded-2xl border border-white/10 bg-white/5 text-white/80 text-sm space-y-2">
+            <div v-else-if="ownerApplicant && !personalCalculation" class="p-6 rounded-2xl border border-white/10 bg-white/5 text-white/80 text-sm space-y-2">
               <div class="flex justify-between">
                 <span>Ваш логин</span>
                 <span class="font-mono text-white">{{ ownerApplicant.login || '—' }}</span>
@@ -441,13 +246,27 @@ const computeResult = (applicant: Applicant | null) => {
                 <span>Всего оплачено</span>
                 <span class="font-semibold text-white">{{ formatMoney(ownerApplicant.paidAmount) }} ₽</span>
               </div>
+              <div class="mt-4 text-yellow-400 text-sm">
+                ⏳ Персональный расчет появится после обработки ваших платежей на платформе.
+              </div>
             </div>
 
-            <div v-if="result" class="space-y-5">
+            <div v-else-if="personalCalculation" class="space-y-5">
+              <div v-if="ownerApplicant" class="p-6 rounded-2xl border border-white/10 bg-white/5 text-white/80 text-sm space-y-2">
+                <div class="flex justify-between">
+                  <span>Ваш логин</span>
+                  <span class="font-mono text-white">{{ ownerApplicant.login || personalCalculation.applicantLogin || '—' }}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Всего оплачено</span>
+                  <span class="font-semibold text-white">{{ formatMoney(personalCalculation.totalPaid) }} ₽</span>
+                </div>
+              </div>
+
               <div class="bg-white/5 border border-white/10 rounded-2xl p-6">
                 <h3 class="section-title">Платежи заявителя</h3>
-                <div v-if="result.payments.length > 0" class="space-y-3">
-                  <div v-for="(payment, index) in result.payments" :key="index" class="flex items-center justify-between">
+                <div v-if="payments.length > 0" class="space-y-3">
+                  <div v-for="(payment, index) in payments" :key="index" class="flex items-center justify-between">
                     <span class="text-white/60">{{ formatDateTime(payment.createdAt) }}</span>
                     <span class="text-white font-semibold">{{ formatMoney(payment.amount) }} ₽</span>
                   </div>
@@ -455,25 +274,27 @@ const computeResult = (applicant: Applicant | null) => {
                 <div v-else class="text-white/60 text-sm">Нет детальной информации о платежах</div>
               </div>
 
-              <div v-if="result.status === 'failed'" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-6">
+              <!-- Статус: Сбор не состоялся -->
+              <div v-if="personalCalculation.status === 'failed'" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-6">
                 <h3 class="section-title text-red-400">Сбор не состоялся</h3>
                 <p class="text-white/80 text-sm mb-4">
                   Недостаточно собранных средств. Все платежи будут возвращены в полном объеме.
                 </p>
                 <div class="flex justify-between text-white/80 text-sm">
                   <span>Общая сумма взносов</span>
-                  <span class="font-semibold text-white">{{ formatMoney(result.totalPaid) }} ₽</span>
+                  <span class="font-semibold text-white">{{ formatMoney(personalCalculation.totalPaid) }} ₽</span>
                 </div>
-                <div class="flex justify-between text-white/60 text-xs mt-2">
+                <div class="flex justify-between text-white/60 text-xs mt-2" v-if="personalCalculation.deficit !== undefined && personalCalculation.deficit > 0">
                   <span>Дефицит:</span>
-                  <span>{{ formatMoney(result.deficit) }} ₽</span>
+                  <span>{{ formatMoney(personalCalculation.deficit) }} ₽</span>
                 </div>
               </div>
 
-              <div v-else-if="result.status === 'overflow'" class="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-6">
+              <!-- Статус: Сверх лимита -->
+              <div v-else-if="personalCalculation.status === 'overflow'" class="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-6">
                 <h3 class="section-title text-yellow-300">Вы не вошли в список участников</h3>
                 <p class="text-white/80 text-sm mb-4">
-                  <template v-if="result.reason === 'late'">
+                  <template v-if="personalCalculation.reason === 'late'">
                     Ваша ставка поступила позже других участников с такой же суммой. Все внесенные средства будут возвращены полностью.
                   </template>
                   <template v-else>
@@ -482,52 +303,53 @@ const computeResult = (applicant: Applicant | null) => {
                 </p>
                 <div class="flex justify-between text-white/80 text-sm">
                   <span>Общая сумма взносов</span>
-                  <span class="font-semibold text-white">{{ formatMoney(result.totalPaid) }} ₽</span>
+                  <span class="font-semibold text-white">{{ formatMoney(personalCalculation.totalPaid) }} ₽</span>
                 </div>
-                <div class="flex justify-between text-white/60 text-xs mt-2" v-if="result.thresholdAmount !== null">
+                <div class="flex justify-between text-white/60 text-xs mt-2" v-if="personalCalculation.thresholdAmount !== null && personalCalculation.thresholdAmount !== undefined">
                   <span>Пороговая ставка</span>
-                  <span>{{ formatMoney(result.thresholdAmount) }} ₽</span>
+                  <span>{{ formatMoney(personalCalculation.thresholdAmount) }} ₽</span>
                 </div>
-                <div class="flex justify-between text-white/60 text-xs mt-2" v-if="result.reason === 'late' && result.thresholdTime !== null">
+                <div class="flex justify-between text-white/60 text-xs mt-2" v-if="personalCalculation.reason === 'late' && personalCalculation.thresholdTime !== null && personalCalculation.thresholdTime !== undefined">
                   <span>Время порогового платежа</span>
-                  <span>{{ formatTimestamp(result.thresholdTime) }}</span>
+                  <span>{{ formatTimestamp(personalCalculation.thresholdTime) }}</span>
                 </div>
-                <div class="flex justify-between text-white/60 text-xs mt-1" v-if="result.reason === 'late' && result.selectedTime !== null">
+                <div class="flex justify-between text-white/60 text-xs mt-1" v-if="personalCalculation.reason === 'late' && personalCalculation.selectedTime !== null && personalCalculation.selectedTime !== undefined">
                   <span>Ваш платеж поступил</span>
-                  <span>{{ formatTimestamp(result.selectedTime) }}</span>
+                  <span>{{ formatTimestamp(personalCalculation.selectedTime) }}</span>
                 </div>
               </div>
 
-              <div v-else class="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-6 space-y-3">
+              <!-- Статус: Успешно в лимите -->
+              <div v-else-if="personalCalculation.status === 'success'" class="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-6 space-y-3">
                 <h3 class="section-title text-blue-300">Событие состоится</h3>
-                <div class="flex justify-between text-white/70 text-sm">
-                  <span>Минимальный взнос ({{ (ownerApplicant?.seats || 1) }} × {{ formatMoney(pricePerSeat) }} ₽)</span>
-                  <span class="text-white font-semibold">{{ formatMoney(result.expectedPayment) }} ₽</span>
+                <div class="flex justify-between text-white/70 text-sm" v-if="personalCalculation.expectedPayment !== undefined">
+                  <span>Минимальный взнос ({{ ownerApplicant?.seats || 1 }} × {{ formatMoney(pricePerSeat) }} ₽)</span>
+                  <span class="text-white font-semibold">{{ formatMoney(personalCalculation.expectedPayment) }} ₽</span>
                 </div>
                 <div class="flex justify-between text-white/70 text-sm">
                   <span>Фактически внесено</span>
-                  <span class="text-white font-semibold">{{ formatMoney(result.totalPaid) }} ₽</span>
+                  <span class="text-white font-semibold">{{ formatMoney(personalCalculation.totalPaid) }} ₽</span>
                 </div>
-                <div class="flex justify-between text-white/70 text-sm">
+                <div class="flex justify-between text-white/70 text-sm" v-if="personalCalculation.extraContribution !== undefined && personalCalculation.extraContribution > 0">
                   <span>Переплата</span>
-                  <span class="text-white font-semibold">{{ formatMoney(result.extraContribution) }} ₽</span>
+                  <span class="text-white font-semibold">{{ formatMoney(personalCalculation.extraContribution) }} ₽</span>
                 </div>
-                <div class="flex justify-between text-white/70 text-sm" v-if="result.deficit > 0">
+                <div class="flex justify-between text-white/70 text-sm" v-if="personalCalculation.deficit !== undefined && personalCalculation.deficit > 0">
                   <span>Недоплата</span>
-                  <span class="text-white font-semibold">{{ formatMoney(result.deficit) }} ₽</span>
+                  <span class="text-white font-semibold">{{ formatMoney(personalCalculation.deficit) }} ₽</span>
                 </div>
-                <div class="mt-4 p-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white/70" v-if="result.refundFromSurplus > 0">
-                  <div class="flex justify-between">
+                <div class="mt-4 p-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white/70" v-if="personalCalculation.refundFromSurplus !== undefined && personalCalculation.refundFromSurplus > 0">
+                  <div class="flex justify-between" v-if="personalCalculation.share !== undefined">
                     <span>Доля в распределении профицита</span>
-                    <span class="text-white font-semibold">{{ (result.share * 100).toFixed(2) }}%</span>
+                    <span class="text-white font-semibold">{{ (personalCalculation.share * 100).toFixed(2) }}%</span>
                   </div>
-                  <div class="flex justify-between mt-2">
+                  <div class="flex justify-between mt-2" v-if="personalCalculation.surplusAvailable !== undefined">
                     <span>Профицит для распределения</span>
-                    <span class="text-white font-semibold">{{ formatMoney(result.surplusAvailable) }} ₽</span>
+                    <span class="text-white font-semibold">{{ formatMoney(personalCalculation.surplusAvailable) }} ₽</span>
                   </div>
                   <div class="flex justify-between mt-2">
                     <span>Возврат из профицита</span>
-                    <span class="text-white font-semibold">{{ formatMoney(result.refundFromSurplus) }} ₽</span>
+                    <span class="text-white font-semibold">{{ formatMoney(personalCalculation.refundFromSurplus) }} ₽</span>
                   </div>
                 </div>
                 <div v-else class="text-white/60 text-sm">
@@ -537,12 +359,8 @@ const computeResult = (applicant: Applicant | null) => {
 
               <div class="summary-card">
                 <div class="summary-label">Итого к возврату</div>
-                <div class="summary-value">{{ formatMoney(result.refundTotal) }} ₽</div>
+                <div class="summary-value">{{ formatMoney(personalCalculation.refundTotal) }} ₽</div>
               </div>
-            </div>
-
-            <div v-else-if="isViewerParticipant" class="text-center py-12 text-white/60">
-              Персональный расчет появится после обработки ваших платежей.
             </div>
 
             <div class="flex justify-end">
@@ -635,4 +453,3 @@ const computeResult = (applicant: Applicant | null) => {
   color: #ff3b30 !important;
 }
 </style>
-
