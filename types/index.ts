@@ -53,26 +53,24 @@ export interface Applicant {
   paidAmount: number
   payments?: PaymentEntry[]
 }
-// Персональный расчет для участника (рассчитывается на сервере)
-export interface PersonalCalculation {
+export interface PersonalCalculationResult {
   applicantCode: string
-  applicantLogin?: string // Логин заявителя
-  status: 'success' | 'overflow' | 'failed' // Успешно в лимите | Сверх лимита | Сбор не состоялся
-  expectedPayment?: number // Ожидаемый платеж (в копейках)
-  totalPaid: number // Фактически внесено (в копейках)
-  extraContribution?: number // Переплата (в копейках)
-  deficit?: number // Недоплата (в копейках)
-  share?: number // Доля в распределении профицита (0-1)
-  refundFromSurplus?: number // Возврат из профицита (в копейках)
-  refundTotal: number // Итого к возврату (в копейках)
-  pricePerSeat?: number // Цена за место (в копейках)
-  surplusAvailable?: number // Доступный профицит для распределения (в копейках)
-  overflowTotal?: number // Сумма возврата сверхлимитчикам (в копейках)
-  // Для статуса 'overflow':
-  reason?: 'lower' | 'late' // Причина выхода за лимит: меньшая сумма или поздний платеж
-  thresholdAmount?: number | null // Пороговая ставка (в копейках)
-  thresholdTime?: number | null // Время порогового платежа (timestamp)
-  selectedTime?: number | null // Время платежа участника (timestamp)
+  applicantLogin?: string
+  status: 'success' | 'failed' | 'overflow'
+  totalPaid: number
+  expectedPayment?: number
+  extraContribution?: number
+  deficit?: number
+  share?: number
+  refundFromSurplus?: number
+  refundTotal: number
+  pricePerSeat: number
+  surplusAvailable?: number
+  overflowTotal?: number
+  reason?: 'lower' | 'late'
+  thresholdAmount?: number | null
+  thresholdTime?: number | null
+  selectedTime?: number | null
 }
 
 export interface MonitoringSnapshot {
@@ -84,7 +82,7 @@ export interface MonitoringSnapshot {
   isCancelled?: boolean
   applicants: Applicant[]
   deadlineNext?: string
-  // Готовые персональные расчеты для всех участников (рассчитываются на сервере)
-  personalCalculations?: PersonalCalculation[]
+  personalCalculations?: PersonalCalculationResult[] // Готовые персональные расчеты для всех участников
+  totalParticipantsExtras?: number // Суммарная переплата всех участников, вошедших в лимит
 }
 

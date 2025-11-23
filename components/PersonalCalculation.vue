@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import type { EventItem, MonitoringSnapshot, Applicant, PersonalCalculation } from '~/types'
+import type { EventItem, MonitoringSnapshot, Applicant, PersonalCalculationResult } from '~/types'
 
 const props = defineProps<{
   event: EventItem
@@ -29,7 +29,7 @@ if (process.client) {
 }
 
 // Находим персональный расчет для текущего пользователя из готовых данных API
-const personalCalculation = computed<PersonalCalculation | null>(() => {
+const personalCalculation = computed<PersonalCalculationResult | null>(() => {
   if (!props.snapshot.personalCalculations || props.snapshot.personalCalculations.length === 0) {
     if (process.client) {
       console.warn('PersonalCalculation: personalCalculations not found in snapshot')
@@ -327,12 +327,16 @@ const payments = computed(() => {
                   <span class="text-white font-semibold">{{ formatMoney(personalCalculation.expectedPayment) }} ₽</span>
                 </div>
                 <div class="flex justify-between text-white/70 text-sm">
-                  <span>Фактически внесено</span>
+                  <span>Внес заявитель</span>
                   <span class="text-white font-semibold">{{ formatMoney(personalCalculation.totalPaid) }} ₽</span>
                 </div>
                 <div class="flex justify-between text-white/70 text-sm" v-if="personalCalculation.extraContribution !== undefined && personalCalculation.extraContribution > 0">
-                  <span>Переплата</span>
+                  <span>Переплата заявителя</span>
                   <span class="text-white font-semibold">{{ formatMoney(personalCalculation.extraContribution) }} ₽</span>
+                </div>
+                <div class="flex justify-between text-white/70 text-sm" v-if="snapshot.totalParticipantsExtras !== undefined && snapshot.totalParticipantsExtras > 0">
+                  <span>Переплата суммарная участников</span>
+                  <span class="text-white font-semibold">{{ formatMoney(snapshot.totalParticipantsExtras) }} ₽</span>
                 </div>
                 <div class="flex justify-between text-white/70 text-sm" v-if="personalCalculation.deficit !== undefined && personalCalculation.deficit > 0">
                   <span>Недоплата</span>
@@ -341,7 +345,7 @@ const payments = computed(() => {
                 <div class="mt-4 p-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white/70" v-if="personalCalculation.refundFromSurplus !== undefined && personalCalculation.refundFromSurplus > 0">
                   <div class="flex justify-between" v-if="personalCalculation.share !== undefined">
                     <span>Доля в распределении профицита</span>
-                    <span class="text-white font-semibold">{{ (personalCalculation.share * 100).toFixed(2) }}%</span>
+                    <span class="text-white font-semibold">{{ personalCalculation.share.toFixed(4) }}</span>
                   </div>
                   <div class="flex justify-between mt-2" v-if="personalCalculation.surplusAvailable !== undefined">
                     <span>Профицит для распределения</span>
