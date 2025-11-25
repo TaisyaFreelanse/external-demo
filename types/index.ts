@@ -2,7 +2,7 @@
 export type ControlPointCode = 't0'|'ti10'|'ti20'|'ti30'|'ti40'|'ti50'|'t999'
 export type EventCategory = 'master-class' | 'training' | 'excursion' | 'gastro-show' | 'lecture' | 'cruise'
 export type EventStatus = 'draft' | 'published'
-export type UserRole = 'applicant' | 'producer' | 'moderator'
+export type UserRole = 'applicant' | 'moderator'
 
 // Автор мероприятия
 export interface Author {
@@ -85,4 +85,3 @@ export interface MonitoringSnapshot {
   personalCalculations?: PersonalCalculationResult[] // Готовые персональные расчеты для всех участников
   totalParticipantsExtras?: number // Суммарная переплата всех участников, вошедших в лимит
 }
-
