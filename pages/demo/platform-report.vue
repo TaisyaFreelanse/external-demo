@@ -175,9 +175,15 @@
                               {{ expandedApplicantKey === applicantKey(applicant) ? 'Скрыть' : `Показать (${applicant.payments?.length || 0})` }}
                             </button>
                             <button
-                              @click="openPersonalCalc(applicant)"
-                              class="inline-flex items-center gap-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 hover:border-blue-500/30 rounded-lg px-2 py-1 transition-all text-blue-400 hover:text-blue-300 text-xs"
-                              title="Персональная калькуляция"
+                              @click="hasTi20Passed ? openPersonalCalc(applicant) : showTi20Warning()"
+                              :class="[
+                                'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 transition-all text-xs',
+                                hasTi20Passed 
+                                  ? 'bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 hover:border-blue-500/30 text-blue-400 hover:text-blue-300 cursor-pointer'
+                                  : 'bg-gray-500/10 border border-gray-500/20 text-gray-500 cursor-not-allowed'
+                              ]"
+                              :title="hasTi20Passed ? 'Персональная калькуляция' : 'Персональные результаты будут доступны после окончания приема заявок (Ti20)'"
+                              :disabled="!hasTi20Passed"
                             >
                               <span class="font-medium">Перс.результ</span>
                             </button>
@@ -813,6 +819,11 @@ const closePersonalCalc = () => {
   selectedApplicantForCalc.value = null
 }
 
+// Показать предупреждение о недоступности персональных результатов до Ti20
+const showTi20Warning = () => {
+  alert('⏳ Персональные результаты будут доступны после окончания приема заявок (Ti20)\n\nСейчас участники еще могут делать ставки, поэтому результаты могут измениться.')
+}
+
 // Форматирование цены
 const formatPrice = (value: number | string | null | undefined): string => {
   const amountNumber = Number(value) || 0
@@ -913,7 +924,6 @@ watch(monitoringData, () => {
   expandedApplicantKey.value = null
 })
 </script>
-
 
 
 
